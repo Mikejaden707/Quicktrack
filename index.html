@@ -64,7 +64,7 @@
         <input 
           type="text" 
           id="clientAddressInput" 
-          placeholder="e.g., Zurich, Switzerland or Tokyo, Japan or London, UK" 
+          placeholder="e.g., Tbilisi, Georgia or New York, USA" 
           class="flex-grow px-4 py-3 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 text-slate-900 text-sm shadow-sm"
         />
         <button 
@@ -88,8 +88,8 @@
           <p id="trackingIdDisplay" class="text-sm text-slate-600 font-mono mt-1">ID: AG-8849-GLOBAL</p>
         </div>
         <div class="bg-white px-4 py-3 rounded-xl border border-slate-200 shadow-sm">
-          <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">Estimated Route Time</span>
-          <span id="estimatedDelivery" class="text-base font-black text-slate-800">Calculating...</span>
+          <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">Transit Schedule</span>
+          <span id="estimatedDelivery" class="text-base font-black text-slate-800">Active Air Corridor</span>
         </div>
       </div>
 
@@ -157,16 +157,22 @@
       btn.innerHTML = "Initializing Route...";
 
       try {
-        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressInput)}`);
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&q=${encodeURIComponent(addressInput)}`);
         const data = await response.json();
 
         if (data && data.length > 0) {
           const destName = data[0].display_name;
           const lat = parseFloat(data[0].lat);
           const lon = parseFloat(data[0].lon);
+          const addressDetails = data[0].address || {};
+          const countryCode = (addressDetails.country_code || '').toLowerCase();
+          
+          // Determine continent based on country code / location name
+          const americanCountries = ['us', 'ca', 'mx', 'br', 'ar', 'co', 'cl', 'pe'];
+          const isAmerica = americanCountries.includes(countryCode) || /united states|canada|america|brazil|mexico/i.test(destName);
 
           document.getElementById('addressCard').style.display = 'none';
-          renderTrackingView(destName, lat, lon);
+          renderTrackingView(destName, lat, lon, isAmerica);
         } else {
           alert("Location not found. Please enter a more specific city or country.");
           btn.innerHTML = originalText;
@@ -177,42 +183,36 @@
       }
     }
 
-    function renderTrackingView(destName, dlat, dlng) {
+    function renderTrackingView(destName, dlat, dlng, isAmerica) {
       const resultsCard = document.getElementById('resultsCard');
       resultsCard.classList.remove('hidden');
 
       const params = new URLSearchParams(window.location.search);
       
       const trackingId = params.get('id') || 'AG-8849-GLOBAL';
-      const progressNum = parseInt(params.get('progress') || '30', 10);
-      const customStatus = params.get('status');
-      const customReason = params.get('reason');
+      const progressNum = parseInt(params.get('progress') || '60', 10); // Defaults to 60 on first entry
 
-      let transitTimeText = "Approx. 48 Hours Flight Time";
+      let transitStatusText = "Active Air Corridor";
       if (progressNum >= 100) {
-        transitTimeText = "Delivered Today";
+        transitStatusText = "Delivered & Completed";
       }
 
       let isHold = false;
-      let holdReason = "";
-      let statusTitle = customStatus || "In Transit (International Flight)";
+      let statusTitle = "In Transit (International Flight)";
 
       if (progressNum === 60) {
         isHold = true;
         statusTitle = "Shipment On Hold (Customs Security Clearance)";
-        holdReason = customReason || "Import duty verification & customs clearance required. Please contact support.";
       } else if (progressNum === 90) {
         isHold = true;
         statusTitle = "Shipment On Hold (Local Carrier Verification)";
-        holdReason = customReason || "Final mile delivery paused: Local secure address confirmation required. Contact support.";
-      } else if (params.get('hold') === 'true') {
-        isHold = true;
-        holdReason = customReason || "Package held for verification. Please contact support.";
+      } else if (progressNum >= 100) {
+        statusTitle = "Package Delivered Successfully";
       }
 
       document.getElementById('statusTitle').innerText = statusTitle;
       document.getElementById('trackingIdDisplay').innerText = "ID: " + trackingId;
-      document.getElementById('estimatedDelivery').innerText = isHold ? "Pending Resolution" : transitTimeText;
+      document.getElementById('estimatedDelivery').innerText = isHold ? "Action Required" : transitStatusText;
 
       const progressBar = document.getElementById('progressBar');
       progressBar.style.width = progressNum + '%';
@@ -226,14 +226,15 @@
         statusLabel.className = "text-xs font-bold uppercase tracking-wider text-amber-700";
         progressBar.className = "bg-amber-500 h-2.5 rounded-full transition-all duration-500";
 
+        // Clean message hiding exact reasons, forcing them to contact support
         alertContainer.innerHTML = `
           <div class="mb-6 bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r-xl shadow-sm">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h4 class="text-sm font-bold text-amber-900 uppercase tracking-wide flex items-center gap-1.5">
-                  ⚠️ Action Required: Operational Hold
+                  ⚠️ Action Required: Operational Hold Status
                 </h4>
-                <p class="text-xs text-amber-800 mt-1">${holdReason}</p>
+                <p class="text-xs text-amber-800 mt-1">This shipment has been paused pending standard gateway verification. Please contact support to review secure status details.</p>
               </div>
               <a href="mailto:Paweldavison@gmail.com?subject=Support Inquiry for Tracking ID: ${trackingId}" 
                  class="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-5 py-3 rounded-lg shadow transition text-center whitespace-nowrap flex items-center justify-center gap-2">
@@ -242,14 +243,26 @@
             </div>
           </div>
         `;
+      } else if (progressNum >= 100) {
+        statusHeaderBg.className = "p-6 sm:p-8 border-b flex flex-col md:flex-row justify-between md:items-center gap-4 bg-emerald-50/80 border-emerald-200";
+        statusLabel.className = "text-xs font-bold uppercase tracking-wider text-emerald-700";
+        progressBar.className = "bg-emerald-600 h-2.5 rounded-full transition-all duration-500";
+        alertContainer.innerHTML = `
+          <div class="mb-6 bg-emerald-50 border-l-4 border-emerald-500 p-4 rounded-r-xl shadow-sm">
+            <h4 class="text-sm font-bold text-emerald-900 uppercase tracking-wide">🎉 Delivery Complete</h4>
+            <p class="text-xs text-emerald-800 mt-1">Your secure package has been safely delivered to the recipient address.</p>
+          </div>
+        `;
       } else {
         statusHeaderBg.className = "p-6 sm:p-8 border-b flex flex-col md:flex-row justify-between md:items-center gap-4 bg-indigo-50/50 border-indigo-100";
         statusLabel.className = "text-xs font-bold uppercase tracking-wider text-indigo-700";
         progressBar.className = "bg-indigo-600 h-2.5 rounded-full transition-all duration-500";
+        alertContainer.innerHTML = "";
       }
 
       const timelineContainer = document.getElementById('timelineContainer');
-      const activeDotColor = isHold ? 'bg-amber-500 ring-4 ring-amber-100' : 'bg-indigo-600 ring-4 ring-indigo-100';
+      const activeDotColor = isHold ? 'bg-amber-500 ring-4 ring-amber-100' : (progressNum >= 100 ? 'bg-emerald-600 ring-4 ring-emerald-100' : 'bg-indigo-600 ring-4 ring-indigo-100');
+      const originHubName = isAmerica ? "Departed North American Central Air Hub" : "Departed European Central Cargo Hub";
 
       timelineContainer.innerHTML = `
         <div class="relative">
@@ -261,18 +274,15 @@
         <div class="relative">
           <span class="absolute -left-[31px] top-1 w-3.5 h-3.5 rounded-full bg-slate-300 ring-4 ring-slate-100" aria-hidden="true"></span>
           <div class="text-xs text-slate-400 font-semibold">Origin Dispatch</div>
-          <div class="text-sm font-bold text-slate-900">Departed International Gateway Facility</div>
+          <div class="text-sm font-bold text-slate-900">${originHubName}</div>
           <div class="text-xs text-slate-500">Secure Global Logistics Network</div>
         </div>
       `;
 
       setTimeout(() => {
         const destLatLng = [dlat, dlng];
-
-        // Create an offset hidden origin point (e.g., 10-15 degrees away) so the route line draws in from off-screen toward the destination
-        const hiddenOriginLat = dlat > 0 ? dlat - 15 : dlat + 15;
-        const hiddenOriginLng = dlng > 0 ? dlng - 20 : dlng + 20;
-        const hiddenOriginLatLng = [hiddenOriginLat, hiddenOriginLng];
+        // Dynamic origin base: New York hub if America, Frankfurt hub if Europe
+        const companyBaseLatLng = isAmerica ? [40.6413, -73.7781] : [50.0379, 8.5622]; 
 
         if (!map) {
           map = L.map('map');
@@ -287,20 +297,17 @@
 
         markersGroup = L.layerGroup().addTo(map);
 
-        // ONLY add the destination marker. The starting point marker is completely omitted.
         const destMarker = L.marker(destLatLng).bindPopup(`<b>Delivery Destination:</b> ${destName}`);
         markersGroup.addLayer(destMarker);
 
-        // Draw the transit line coming from an anonymous global direction toward the destination
-        const lineColor = isHold ? '#f59e0b' : '#4f46e5';
-        routeLine = L.polyline([hiddenOriginLatLng, destLatLng], {
+        const lineColor = isHold ? '#f59e0b' : (progressNum >= 100 ? '#059669' : '#4f46e5');
+        routeLine = L.polyline([companyBaseLatLng, destLatLng], {
           color: lineColor,
           weight: 4,
-          dashArray: '8, 8'
+          dashArray: progressNum >= 100 ? null : '8, 8'
         }).addTo(map);
 
-        // Zoom map to focus on the destination area and incoming route
-        const bounds = L.latLngBounds([hiddenOriginLatLng, destLatLng]);
+        const bounds = L.latLngBounds([companyBaseLatLng, destLatLng]);
         map.fitBounds(bounds, { padding: [60, 60] });
 
         destMarker.openPopup();
